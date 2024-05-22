@@ -53,18 +53,18 @@
     (defvar json-object-type)
     (declare-function json-read "json" ())
     `(let ((json-object-type 'plist))
-      (json-read))))
+       (json-read))))
 
 (defmacro gptel--json-encode (object)
   (if (fboundp 'json-serialize)
       `(json-serialize ,object
-        :null-object nil
-        :false-object :json-false)
+                       :null-object nil
+                       :false-object :json-false)
     (require 'json)
     (defvar json-false)
     (declare-function json-encode "json" (object))
     `(let ((json-false :json-false))
-      (json-encode ,object))))
+       (json-encode ,object))))
 
 ;;; Common backend struct for LLM support
 (defvar gptel--known-backends nil
@@ -109,10 +109,10 @@ with differing settings.")
   "JSON encode PROMPTS for sending to ChatGPT."
   (let ((prompts-plist
          `(:model ,gptel-model
-           :messages [,@prompts]
-           :stream ,(or (and gptel-stream gptel-use-curl
-                         (gptel-backend-stream gptel-backend))
-                     :json-false))))
+                  :messages [,@prompts]
+                  :stream ,(or (and gptel-stream gptel-use-curl
+                                    (gptel-backend-stream gptel-backend))
+                               :json-false))))
     (when gptel-temperature
       (plist-put prompts-plist :temperature gptel-temperature))
     (when gptel-max-tokens
@@ -130,25 +130,107 @@ with differing settings.")
                           t))))
       (push (list :role (if (prop-match-value prop) "assistant" "user")
                   :content
-                  (string-trim
-                   (buffer-substring-no-properties (prop-match-beginning prop)
-                                                   (prop-match-end prop))
-                   (format "[\t\r\n ]*\\(?:%s\\)?[\t\r\n ]*"
-                           (regexp-quote (gptel-prompt-prefix-string)))
-                   (format "[\t\r\n ]*\\(?:%s\\)?[\t\r\n ]*"
-                           (regexp-quote (gptel-response-prefix-string)))))
+                  (gptel--parse-prompt
+                   gptel-backend (intern gptel-model) (prop-match-value prop)
+                   (prop-match-beginning prop) (prop-match-end prop)))
             prompts)
       (and max-entries (cl-decf max-entries)))
     (cons (list :role "system"
                 :content gptel--system-message)
           prompts)))
 
+(declare-function org-element-context "org-element")
+(declare-function org-element-property "org-element-ast")
+(declare-function org-element-begin "org-element-ast")
+(declare-function org-element-end "org-element-ast")
+(defvar org-link-plain-re)
+(declare-function org-export-inline-image-p "ox")
+
+(cl-defgeneric gptel--parse-prompt (backend model responsep beg end)
+  "Parse prompt between BEG and END.
+BEG and END are the limits of the prompt.
+BACKEND is the active gptel backend.
+MODE is the current major mode.
+RESPONSEP is true if the region is a gptel response.")
+
+(cl-defmethod gptel--parse-prompt ((_backend gptel-openai) _model _responsep beg end)
+  (string-trim
+   (buffer-substring-no-properties beg end)
+   (format "[\t\r\n ]*\\(?:%s\\)?[\t\r\n ]*"
+           (regexp-quote (gptel-prompt-prefix-string)))
+   (format "[\t\r\n ]*\\(?:%s\\)?[\t\r\n ]*"
+           (regexp-quote (gptel-response-prefix-string)))))
+
+(declare-function org-element-contents-end "org-element")
+(declare-function org-element-contents-begin "org-element")
+(declare-function org-element-lineage "org-element")
+
+(defun gptel-org--object-stand-alone-p (object)
+  (let ((par (org-element-lineage object 'paragraph)))
+    (and (= (org-element-begin object)
+            (save-excursion
+              (goto-char (org-element-contents-begin par))
+              (skip-chars-forward "\t ")
+              (point)))                 ;account for leading space
+                                        ;before object
+         (<= (- (org-element-contents-end par)
+                (org-element-end object))
+             1))))
+
+(cl-defmethod gptel--parse-prompt ((_backend gptel-openai) (_model (eql 'gpt-4-vision-preview))
+                                   (_responsep (eql nil)) beg end
+                                   &context (major-mode (eql 'org-mode)))
+  (goto-char beg)
+  (when (looking-at (format "[\t\r\n ]*\\(?:%s\\)?[\t\r\n ]*"
+                            (regexp-quote (gptel-prompt-prefix-string))))
+    (goto-char (match-end 0)))
+  (let ((parts) (from-pt (point)))
+    (while (re-search-forward org-link-plain-re end t)
+      (when-let* ((link (org-element-context))
+                  ((gptel-org--object-stand-alone-p link))
+                  (raw-link (org-element-property :raw-link link))
+                  (path (org-element-property :path link))
+                  (type (org-element-property :type link))
+                  ((member type '("file" "http" "https" "ftp"))))
+        (cond
+         ((equal type "file")
+          (if (and (not (file-remote-p path))
+                   (file-exists-p path)
+                   (org-export-inline-image-p link))
+              ;; Collect text up to this image, and
+              ;; Collect this image
+              (let ((ext (file-name-extension path)))
+                (when (equal ext "jpg") (setq ext "jpeg"))
+                (push `(:type "text" :text ,(buffer-substring-no-properties from-pt (org-element-begin link)))
+                      parts)
+                (push `(:type "image_url"
+                              :image_url (:url ,(concat "data:image/" ext ";base64," (gptel--base64-encode path))))
+                      parts)
+                (goto-char (org-element-end link))
+                (setq from-pt (point)))))
+         ((and (member type '("http" "https" "ftp"))
+               (string-match-p (image-file-name-regexp) path))
+          ;; Collect text up to this image, and
+          ;; Collect this image url
+          (push `(:type "text" :text ,(buffer-substring-no-properties from-pt (org-element-begin link))) parts)
+          (push `(:type "image_url" :image_url (:url ,raw-link)) parts)
+          (goto-char (org-element-end link))
+          (setq from-pt (point))))))
+    (when (looking-back (format "[\t\r\n ]*\\(?:%s\\)?[\t\r\n ]*"
+                                (regexp-quote (gptel-response-prefix-string)))
+                        from-pt)
+      (goto-char (match-beginning 0)))
+    (when (null parts)
+      (push `(:type "text" :text ,(buffer-substring-no-properties beg end)) parts))
+    (goto-char beg)
+    (apply #'vector (nreverse parts))))
+
 ;;;###autoload
 (cl-defun gptel-make-openai
     (name &key curl-args models stream key
           (header
            (lambda () (when-let (key (gptel--get-api-key))
-                   `(("Authorization" . ,(concat "Bearer " key))))))
+                        `(("Authorization" . ,(concat "Bearer " key))))))
           (host "api.openai.com")
           (protocol "https")
           (endpoint "/v1/chat/completions"))
@@ -194,7 +276,7 @@ function that returns the key."
     (prog1 backend
       (setf (alist-get name gptel--known-backends
                        nil nil #'equal)
-                  backend))))
+            backend))))
 
 ;;; Azure
 ;;;###autoload

@@ -177,7 +177,7 @@ RESPONSEP is true if the region is a gptel response.")
                 (org-element-end object))
              1))))
 
-(cl-defmethod gptel--parse-prompt ((_backend gptel-openai) (_model (eql 'gpt-4-vision-preview))
+(cl-defmethod gptel--parse-prompt ((_backend gptel-openai) (_model (eql 'gpt-4o))
                                    (_responsep (eql nil)) beg end
                                    &context (major-mode (eql 'org-mode)))
   (goto-char beg)

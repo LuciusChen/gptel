@@ -131,13 +131,9 @@ with differing settings.")
                               t))))
           (push (list :role (if (prop-match-value prop) "assistant" "user")
                       :content
-                      (string-trim
-                       (buffer-substring-no-properties (prop-match-beginning prop)
-                                                       (prop-match-end prop))
-                       (format "[\t\r\n ]*\\(?:%s\\)?[\t\r\n ]*"
-                               (regexp-quote (gptel-prompt-prefix-string)))
-                       (format "[\t\r\n ]*\\(?:%s\\)?[\t\r\n ]*"
-                               (regexp-quote (gptel-response-prefix-string)))))
+                      (gptel--parse-prompt
+                       gptel-backend (intern gptel-model) (prop-match-value prop)
+                       (prop-match-beginning prop) (prop-match-end prop)))
                 prompts)
           (and max-entries (cl-decf max-entries)))
       (push (list :role "user"
@@ -223,7 +219,8 @@ RESPONSEP is true if the region is a gptel response.")
           ;; Collect text up to this image, and
           ;; Collect this image url
           (push `(:type "text" :text ,(buffer-substring-no-properties from-pt (org-element-begin link))) parts)
-          (push `(:type "image_url" :image_url (:url ,raw-link)) parts)
+          (when (null parts)
+            (push `(:type "text" :text ,(buffer-substring-no-properties beg end)) parts))
           (goto-char (org-element-end link))
           (setq from-pt (point))))))
     (when (looking-back (format "[\t\r\n ]*\\(?:%s\\)?[\t\r\n ]*"

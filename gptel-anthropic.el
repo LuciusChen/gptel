@@ -33,6 +33,7 @@
 (declare-function prop-match-value "text-property-search")
 (declare-function text-property-search-backward "text-property-search")
 (declare-function json-read "json" ())
+(declare-function gptel-context--wrap "gptel-context")
 
 ;;; Anthropic (Messages API)
 (cl-defstruct (gptel-anthropic (:constructor gptel--make-anthropic)
@@ -100,6 +101,10 @@
             prompts))
     prompts))
 
+(cl-defmethod gptel--wrap-user-prompt ((_backend gptel-anthropic) prompts)
+  "Wrap the last user prompt in PROMPTS with the context string."
+  (cl-callf gptel-context--wrap (plist-get (car (last prompts)) :content)))
+
 ;;;###autoload
 (cl-defun gptel-make-anthropic
     (name &key curl-args stream key
@@ -107,7 +112,8 @@
            (lambda () (when-let (key (gptel--get-api-key))
                         `(("x-api-key" . ,key)
                           ("anthropic-version" . "2023-06-01")))))
-          (models '("claude-3-sonnet-20240229"
+          (models '("claude-3-5-sonnet-20240620"
+                    "claude-3-sonnet-20240229"
                     "claude-3-haiku-20240307"
                     "claude-3-opus-20240229"))
           (host "api.anthropic.com")

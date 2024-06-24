@@ -27,6 +27,7 @@
 (require 'cl-generic)
 
 (declare-function json-read "json" ())
+(declare-function gptel-context--wrap "gptel-context")
 (defvar json-object-type)
 
 ;;; Ollama
@@ -120,6 +121,10 @@ Intended for internal use only.")
     (cons (list :role "system"
                 :content gptel--system-message)
           prompts)))
+
+(cl-defmethod gptel--wrap-user-prompt ((_backend gptel-ollama) prompts)
+  "Wrap the last user prompt in PROMPTS with the context string."
+  (cl-callf gptel-context--wrap (plist-get (car (last prompts)) :content)))
 
 ;;;###autoload
 (cl-defun gptel-make-ollama

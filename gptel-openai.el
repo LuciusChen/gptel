@@ -132,9 +132,13 @@ with differing settings.")
                               t))))
           (push (list :role (if (prop-match-value prop) "assistant" "user")
                       :content
-                      (gptel--parse-prompt
-                       gptel-backend (intern gptel-model) (prop-match-value prop)
-                       (prop-match-beginning prop) (prop-match-end prop)))
+                      (string-trim
+                       (buffer-substring-no-properties (prop-match-beginning prop)
+                                                       (prop-match-end prop))
+                       (format "[\t\r\n ]*\\(?:%s\\)?[\t\r\n ]*"
+                               (regexp-quote (gptel-prompt-prefix-string)))
+                       (format "[\t\r\n ]*\\(?:%s\\)?[\t\r\n ]*"
+                               (regexp-quote (gptel-response-prefix-string)))))
                 prompts)
           (and max-entries (cl-decf max-entries)))
       (push (list :role "user"

@@ -139,9 +139,12 @@ with differing settings.")
           (and max-entries (cl-decf max-entries)))
       (push (list :role "user"
                   :content
-                  (gptel--parse-prompt
-                   gptel-backend (intern gptel-model) (prop-match-value prop)
-                   (prop-match-beginning prop) (prop-match-end prop)))
+                  (string-trim
+                   (buffer-substring-no-properties (point-min) (point-max))
+                   (format "[\t\r\n ]*\\(?:%s\\)?[\t\r\n ]*"
+                           (regexp-quote (gptel-prompt-prefix-string)))
+                   (format "[\t\r\n ]*\\(?:%s\\)?[\t\r\n ]*"
+                           (regexp-quote (gptel-response-prefix-string)))))
             prompts)
       (and max-entries (cl-decf max-entries)))
     (cons (list :role "system"

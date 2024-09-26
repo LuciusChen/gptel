@@ -61,7 +61,8 @@
 (cl-defmethod gptel--request-data ((_backend gptel-gemini) prompts)
   "JSON encode PROMPTS for sending to Gemini."
   (let ((prompts-plist
-         `(:contents [,@prompts]
+         `(:system_instruction (:parts (:text ,gptel--system-message))
+           :contents [,@prompts]
            :safetySettings [(:category "HARM_CATEGORY_HARASSMENT"
                              :threshold "BLOCK_NONE")
                             (:category "HARM_CATEGORY_SEXUALLY_EXPLICIT"
@@ -110,10 +111,6 @@
                   (list :text (string-trim
                                (buffer-substring-no-properties (point-min) (point-max)))))
             prompts))
-    (cl-callf (lambda (msg) (concat gptel--system-message "\n\n" msg))
-        (thread-first (car prompts)
-                      (plist-get :parts)
-                      (plist-get :text)))
     prompts))
 
 (cl-defmethod gptel--wrap-user-prompt ((_backend gptel-gemini) prompts)
@@ -127,6 +124,7 @@
           (host "generativelanguage.googleapis.com")
           (protocol "https")
           (models '("gemini-pro"
+                    "gemini-1.5-flash"
                     "gemini-1.5-pro-latest"))
           (endpoint "/v1beta/models"))
 
@@ -150,9 +148,9 @@ ENDPOINT (optional) is the API endpoint for completions, defaults to
 \"/v1beta/models\".
 
 HEADER (optional) is for additional headers to send with each
-request. It should be an alist or a function that retuns an
+request.  It should be an alist or a function that retuns an
 alist, like:
-((\"Content-Type\" . \"application/json\"))
+ ((\"Content-Type\" . \"application/json\"))
 
 KEY (optional) is a variable whose value is the API key, or
 function that returns the key."
